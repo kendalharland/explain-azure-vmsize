@@ -54,7 +54,7 @@ def tokenize_vm_size(vm_size):
     m = re.match(
         "([A-Za-z]+)"  # Machine tier
         "_"
-        "(A|Bs|D|E|F|G|H|Ls|Mv2|M|N)"  # Machine family
+        "(A|B|Bs|D|E|F|G|H|Ls|L|Mv2|M|N)"  # Machine family
         "([A-Z])?"  # Machine subfamily (optional)
         "(\\d+)"  # Num vCPU
         "-?"

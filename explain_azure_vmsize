@@ -55,14 +55,15 @@ def tokenize_vm_size(vm_size):
         "([A-Za-z]+)"  # Machine tier
         "_"
         "(A|Bs|D|E|F|G|H|Ls|Mv2|M|N)"  # Machine family
-        "([A-Z]?)"  # Machine subfamily (optional)
-        "(\\d)"  # Num vCPU
+        "([A-Z])?"  # Machine subfamily (optional)
+        "(\\d+)"  # Num vCPU
         "-?"
         "(\\d)?"  # Num constrained vCPU (optional)
-        "([a-zA-Z]+)"  # Additive features
+        "([a-zA-Z]+)?"  # Additive features
         "_?"
         "([A-Za-z0-9]+)?"  # Accelerator type (optional)
-        "_(v\\d+)",  # Version
+        "_?"
+        "(v\\d+)?",  # Version
         vm_size,
     )
 
@@ -72,29 +73,37 @@ def tokenize_vm_size(vm_size):
     tokens = [
         match_token(m, TOK_MACHINE_TIER),
         match_token(m, TOK_MACHINE_FAMILY),
-        match_token(m, TOK_MACHINE_SUBFAMILY),
-        match_token(m, TOK_NUM_VCPU),
     ]
 
+    if has_token(m, TOK_MACHINE_SUBFAMILY):
+        tokens.append(match_token(m, TOK_MACHINE_SUBFAMILY))
+
+    if has_token(m, TOK_NUM_VCPU):
+        tokens.append(match_token(m, TOK_NUM_VCPU))
+
     if has_token(m, TOK_NUM_CONSTRAINED_VCPU):
-        match_token(m, TOK_NUM_CONSTRAINED_VCPU)
+        tokens.append(match_token(m, TOK_NUM_CONSTRAINED_VCPU))
 
     # Additive features are matched as a single string above.
     # Here we split that string into separate tokens per feature.
-    features = m.groups()[TOK_FEATURE]
-    feature_index = 0
-    while feature_index < len(features):
-        # There is no 'N' feature. 'NP' is a special snowflake in that it's
-        # the only feature denoted using more than 1 letter.
-        token_length = 2 if features[feature_index] == "N" else 1
-        token = match_token(m, TOK_FEATURE, offset=feature_index, length=token_length)
-        tokens.append(token)
-        feature_index += token_length
+    if has_token(m, TOK_FEATURE):
+        features = m.groups()[TOK_FEATURE]
+        feature_index = 0
+        while feature_index < len(features):
+            # There is no 'N' feature. 'NP' is a special snowflake in that it's
+            # the only feature denoted using more than 1 letter.
+            token_length = 2 if features[feature_index] == "N" else 1
+            token = match_token(
+                m, TOK_FEATURE, offset=feature_index, length=token_length
+            )
+            tokens.append(token)
+            feature_index += token_length
 
     if has_token(m, TOK_ACCELERATOR_TYPE):
         tokens.append(match_token(m, TOK_ACCELERATOR_TYPE))
 
-    tokens.append(match_token(m, TOK_VERSION))
+    if has_token(m, TOK_VERSION):
+        tokens.append(match_token(m, TOK_VERSION))
 
     return tokens
 
@@ -156,7 +165,7 @@ def explain_machine_family(input):
         "M": "TB of RAM. High performance. parallel compute.",
         "Mv2": "TB of RAM. High performance parallel compute. Larger than M-Series",
         "N": "GPU enabled",
-    }[input]
+    }.get(input, "UNKOWN")
     return f"{input}-Series: {buzzwords}"
 
 
@@ -173,12 +182,12 @@ def explain_feature(input):
         "i": "isolated size",
         "l": "low memory; a lower amount of memory than the memory intensive size",
         "m": "memory intensive; the most amount of memory in a particular size",
-        "p": "ARM Cpu",
+        "p": "ARM CPU",
         "t": "tiny memory; the smallest amount of memory in a particular size",
         "s": "Premium Storage capable. Ultra SSD possible.",
         "C": "Confidential",
         "NP": "node packing",
-    }[input]
+    }.get(input, "UKNOWN")
     return f"Feature {input}: {description}"
 
 

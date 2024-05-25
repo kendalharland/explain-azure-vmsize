@@ -1,0 +1,246 @@
+#!/usr/bin/python3
+
+# MIT License
+#
+# Copyright (c) 2024 Kendal Harland
+
+from collections import namedtuple
+import sys
+import re
+import os
+
+# An Explanation is a explanation of a slice of some string.
+#
+# `start` is the position of the slice's first character in the input string.
+# `explanation` explains what the slice means.
+Explanation = namedtuple("Explanation", ["start", "explanation"])
+
+# An atomic substring of the User's input.
+# `start` is the position of the first character of this token.
+# `value` is the token's content.
+# `kind` describes what type of token this is.
+Token = namedtuple("Token", ["start", "value", "kind"])
+
+# Token types represent parts of an Azure VM size name.
+# To simplify parsing, each token type's value is the position the token
+# appears in the VM size name.
+#
+# To learn more about the naming scheme, see:
+# https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions
+TOK_MACHINE_TIER = 0
+TOK_MACHINE_FAMILY = 1
+TOK_MACHINE_SUBFAMILY = 2
+TOK_NUM_VCPU = 3
+TOK_NUM_CONSTRAINED_VCPU = 4
+TOK_FEATURE = 5
+TOK_ACCELERATOR_TYPE = 6
+TOK_VERSION = 7
+
+
+def match_token(m, kind, offset=0, length=-1):
+    end = offset + length if length > 0 else len(m.groups(kind))
+    return Token(
+        kind=kind,
+        start=m.start(kind + 1) + offset,
+        value=m.groups()[kind][offset:end],
+    )
+
+
+def has_token(m, kind):
+    return m.start(kind + 1) > 0
+
+
+def tokenize_vm_size(vm_size):
+    m = re.match(
+        "([A-Za-z]+)"  # Machine tier
+        "_"
+        "(A|Bs|D|E|F|G|H|Ls|Mv2|M|N)"  # Machine family
+        "([A-Z]?)"  # Machine subfamily (optional)
+        "(\\d)"  # Num vCPU
+        "-?"
+        "(\\d)?"  # Num constrained vCPU (optional)
+        "([a-zA-Z]+)"  # Additive features
+        "_?"
+        "([A-Za-z0-9]+)?"  # Accelerator type (optional)
+        "_(v\\d+)",  # Version
+        vm_size,
+    )
+
+    if not m:
+        raise ValueError(f'Invalid VM size "{vm_size}"')
+
+    tokens = [
+        match_token(m, TOK_MACHINE_TIER),
+        match_token(m, TOK_MACHINE_FAMILY),
+        match_token(m, TOK_MACHINE_SUBFAMILY),
+        match_token(m, TOK_NUM_VCPU),
+    ]
+
+    if has_token(m, TOK_NUM_CONSTRAINED_VCPU):
+        match_token(m, TOK_NUM_CONSTRAINED_VCPU)
+
+    # Additive features are matched as a single string above.
+    # Here we split that string into separate tokens per feature.
+    features = m.groups()[TOK_FEATURE]
+    feature_index = 0
+    while feature_index < len(features):
+        # There is no 'N' feature. 'NP' is a special snowflake in that it's
+        # the only feature denoted using more than 1 letter.
+        token_length = 2 if features[feature_index] == "N" else 1
+        token = match_token(m, TOK_FEATURE, offset=feature_index, length=token_length)
+        tokens.append(token)
+        feature_index += token_length
+
+    if has_token(m, TOK_ACCELERATOR_TYPE):
+        tokens.append(match_token(m, TOK_ACCELERATOR_TYPE))
+
+    tokens.append(match_token(m, TOK_VERSION))
+
+    return tokens
+
+
+def draw_explanation_diagram(string, explanations):
+    """
+    Draws a tree-diagram explaining what the different
+    slices of the string `string` mean, like:
+
+      ExampleInputString
+      |      |    |
+      |      |    +-------- Explanation of 'String'
+      |      +------------- Explanation of 'Input'
+      +-------------------- Explanation of 'Example'
+
+    `explanations` is an list of `Explanation` objects
+    ordered by start position.
+    """
+
+    # Insert a spacer line that just contains ' ' and '|'
+    explanations += (Explanation(len(string), ""),)
+
+    # Build the string starting with the last row and ending at the first.
+    output_lines = []
+    slice_start_positions = [False for i in string]
+    for c in explanations:
+        output_lines.insert(0, "")
+        for i in range(0, len(string)):
+            if c.start == i:
+                output_lines[0] += "+"
+                slice_start_positions[i] = True
+            elif c.start < i:
+                output_lines[0] += "-"
+            elif c.start > i and slice_start_positions[i]:
+                output_lines[0] += "|"
+            elif c.start > i and not slice_start_positions[i]:
+                output_lines[0] += " "
+        output_lines[0] += " " + c.explanation
+    output_lines.insert(0, string)
+
+    return "\n".join(output_lines)
+
+
+def explain_machine_tier(input):
+    return f"{input}: Machine tier"
+
+
+# Copied from https://azure.microsoft.com/pricing/details/virtual-machines/series
+def explain_machine_family(input):
+    buzzwords = {
+        "A": "Low cost. Best for dev/test",
+        "Bs": "Low cost. Burstable. Not hyperthreaded.",
+        "D": "General purpose compute. Hyperthreaded",
+        "E": "High memory-to-core ratio. High storage capacity and throughput",
+        "F": "High core-to-memory ratio. Always have SSD.",
+        "G": "More memory and storage than general purpose (D-Series)",
+        "H": "High performnance computing. Not hyperthreaded.",
+        "Ls": "Storage optimized. Large local disk. Intel Haswell.",
+        "M": "TB of RAM. High performance. parallel compute.",
+        "Mv2": "TB of RAM. High performance parallel compute. Larger than M-Series",
+        "N": "GPU enabled",
+    }[input]
+    return f"{input}-Series: {buzzwords}"
+
+
+def explain_machine_subfamily(input):
+    return f"{input}: Machine subfamily"
+
+
+# Copied from https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions
+def explain_feature(input):
+    description = {
+        "a": "AMD-based processor",
+        "b": "Block Storage performance",
+        "d": "Local temp disk. For newer Azure VMs. See Ddv4 and Ddsv4-series",
+        "i": "isolated size",
+        "l": "low memory; a lower amount of memory than the memory intensive size",
+        "m": "memory intensive; the most amount of memory in a particular size",
+        "p": "ARM Cpu",
+        "t": "tiny memory; the smallest amount of memory in a particular size",
+        "s": "Premium Storage capable. Ultra SSD possible.",
+        "C": "Confidential",
+        "NP": "node packing",
+    }[input]
+    return f"Feature {input}: {description}"
+
+
+def explain_num_vcpus(input):
+    return f"{input}: Number of vCPUs."
+
+
+def explain_num_constrained_vcpus(input):
+    return f"{input}: Number of constrained vCPUs."
+
+
+def explain_accelerator_type(input):
+    return f"{input}: Accelerator type."
+
+
+def explain_version(input):
+    return f"{input}: VM series version."
+
+
+def explain_vm_size(input_vm_size):
+    tokens = tokenize_vm_size(input_vm_size)
+
+    explanations = []
+    for token in tokens:
+        if token.kind == TOK_MACHINE_TIER:
+            explanation = explain_machine_tier(token.value)
+        elif token.kind == TOK_MACHINE_FAMILY:
+            explanation = explain_machine_family(token.value)
+        elif token.kind == TOK_MACHINE_SUBFAMILY:
+            explanation = explain_machine_subfamily(token.value)
+        elif token.kind == TOK_FEATURE:
+            explanation = explain_feature(token.value)
+        elif token.kind == TOK_NUM_VCPU:
+            explanation = explain_num_vcpus(token.value)
+        elif token.kind == TOK_NUM_CONSTRAINED_VCPU:
+            explanation = explain_num_constrained_vcpus(token.value)
+        elif token.kind == TOK_ACCELERATOR_TYPE:
+            explanation = explain_accelerator_type(token.value)
+        elif token.kind == TOK_VERSION:
+            explanation = explain_version(token.value)
+
+        explanations.append(Explanation(token.start, explanation))
+
+    return draw_explanation_diagram(input_vm_size, explanations)
+
+
+def main():
+    if len(sys.argv) != 2:
+        command = os.path.basename(__file__)
+        print(f"Usage: {command} VM_SIZE")
+        print("")
+        print('Prints a description of an Azure VM size, such as "Standard_Mv28p_v2"')
+        sys.exit(0)
+
+    print(explain_vm_size(sys.argv[1]))
+    print("")
+    print("This tool may display information that is out of date.")
+    print("Please consult the following URLs for the latest information:")
+    print("* https://azure.microsoft.com/pricing/details/virtual-machines/series")
+    print(
+        "* https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions"
+    )
+
+
+main()

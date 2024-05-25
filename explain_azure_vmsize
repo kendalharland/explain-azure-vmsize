@@ -9,23 +9,22 @@ import sys
 import re
 import os
 
-# An Explanation is a explanation of a slice of some string.
+# A description of a slice of some string.
 #
-# `start` is the position of the slice's first character in the input string.
-# `explanation` explains what the slice means.
+# `start` is the position of the slice's first character.
+# `explanation` describes the slice.
 Explanation = namedtuple("Explanation", ["start", "explanation"])
 
 # An atomic substring of the User's input.
-# `start` is the position of the first character of this token.
+#
+# `start` is the position of this token's first character.
 # `value` is the token's content.
 # `kind` describes what type of token this is.
 Token = namedtuple("Token", ["start", "value", "kind"])
 
 # Token types represent parts of an Azure VM size name.
 # To simplify parsing, each token type's value is the position the token
-# appears in the VM size name.
-#
-# To learn more about the naming scheme, see:
+# appears in the VM size name. To learn more about the naming scheme, see:
 # https://learn.microsoft.com/en-us/azure/virtual-machines/vm-naming-conventions
 TOK_MACHINE_TIER = 0
 TOK_MACHINE_FAMILY = 1
@@ -84,8 +83,8 @@ def tokenize_vm_size(vm_size):
     if has_token(m, TOK_NUM_CONSTRAINED_VCPU):
         tokens.append(match_token(m, TOK_NUM_CONSTRAINED_VCPU))
 
-    # Additive features are matched as a single string above.
-    # Here we split that string into separate tokens per feature.
+    # Additive features are matched as a single token above.
+    # Split that string into a separate token for each feature.
     if has_token(m, TOK_FEATURE):
         features = m.groups()[TOK_FEATURE]
         feature_index = 0
@@ -110,8 +109,7 @@ def tokenize_vm_size(vm_size):
 
 def draw_explanation_diagram(string, explanations):
     """
-    Draws a tree-diagram explaining what the different
-    slices of the string `string` mean, like:
+    Draws a tree-diagram explaining what the different slices of `string` mean, like:
 
       ExampleInputString
       |      |    |
@@ -119,8 +117,7 @@ def draw_explanation_diagram(string, explanations):
       |      +------------- Explanation of 'Input'
       +-------------------- Explanation of 'Example'
 
-    `explanations` is an list of `Explanation` objects
-    ordered by start position.
+    `explanations` is list of `Explanation` objects ordered by start position.
     """
 
     # Insert a spacer line that just contains ' ' and '|'
@@ -187,7 +184,7 @@ def explain_feature(input):
         "s": "Premium Storage capable. Ultra SSD possible.",
         "C": "Confidential",
         "NP": "node packing",
-    }.get(input, "UKNOWN")
+    }.get(input, "UNKNOWN")
     return f"Feature {input}: {description}"
 
 
